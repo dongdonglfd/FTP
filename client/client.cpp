@@ -251,7 +251,27 @@ public:
                     file.write(buffer, bytes);
                     total += bytes;
                 }
-
+        //         char buffer[DATA_BUFFER_SIZE];
+        //         ssize_t total = 0;
+        //         while (file.read(buffer, sizeof(buffer))) {
+        //             std::streamsize bytes_read = file.gcount();
+        //             if (bytes_read <= 0) break;
+        //             ssize_t total_sent = 0;
+        //             // ssize_t sent = send(data_sock, buffer, bytes_read, MSG_NOSIGNAL);
+        //             // if (sent < 0) throw std::runtime_error("发送失败");
+        //             // total += sent;
+        //             while (total_sent < bytes_read) {
+        //     ssize_t sent = send(data_sock, 
+        //                       buffer + total_sent, 
+        //                       bytes_read - total_sent, 
+        //                       MSG_NOSIGNAL);
+        //     if (sent <= 0) {
+        //         std::cerr << "发送失败: " << strerror(errno) << std::endl;
+        //         break;
+        //     }
+        //     total_sent += sent;
+        // }
+                //}
                 std::string confirm;
                 if (!send_command("", confirm)) return false;
                 std::cout << "下载完成: " << confirm << " (" << total << " bytes)" << std::endl;
@@ -260,38 +280,98 @@ public:
                 return true;
             }
 
-    //         if (cmd == "STOR") {
-    //             if (!pasv_mode) throw std::runtime_error("请先使用PASV模式");
+            if (cmd == "STOR") {
+                if (!pasv_mode) throw std::runtime_error("请先使用PASV模式");
                 
-    //             std::string filename;
-    //             iss >> filename;
-    //             if (filename.empty()) throw std::runtime_error("需要文件名参数");
+                std::string filename;
+                iss >> filename;
+                if (filename.empty()) throw std::runtime_error("需要文件名参数");
 
-    //             std::ifstream file(filename, std::ios::binary);
-    //             if (!file) throw std::runtime_error("文件不存在");
+                std::ifstream file(filename, std::ios::binary);
+                if (!file) throw std::runtime_error("文件不存在");
 
-    //             std::string response;
-    //             if (!send_command("STOR " + filename, response)) return false;
+                std::string response;
+                //if (!send_command("STOR " + filename, response)) return false;
+                std::string full_cmd = cmd + " "+filename+"\r\n";
+                ssize_t sent = send(ctrl_sock, full_cmd.c_str(), full_cmd.size(), 0);
 
-    //             char buffer[DATA_BUFFER_SIZE];
-    //             ssize_t total = 0;
-    //             while (file.read(buffer, sizeof(buffer))) {
-    //                 ssize_t sent = send(data_sock, buffer, file.gcount(), 0);
-    //                 if (sent < 0) throw std::runtime_error("发送失败");
-    //                 total += sent;
-    //             }
+        //         char buffer[DATA_BUFFER_SIZE];
+        //         ssize_t total = 0;
+                
+        //         while (file.read(buffer, sizeof(buffer))) {
+        //             std::streamsize bytes_read = file.gcount();
+        //             total=bytes_read;
+        //             if (bytes_read <= 0) break;
+        //             ssize_t total_sent = 0;
 
-    //             std::string confirm;
-    //             if (!send_command("", confirm)) return false;
-    //             std::cout << "上传完成: " << confirm << " (" << total << " bytes)" << std::endl;
-
-    //             close_data_conn();
-    //             return true;
+        //             while (total_sent < bytes_read) {
+        //     ssize_t sent = send(data_sock, 
+        //                       buffer + total_sent, 
+        //                       bytes_read - total_sent, 
+        //                       MSG_NOSIGNAL);
+        //     if (sent <= 0) {
+        //         std::cerr << "发送失败: " << strerror(errno) << std::endl;
+        //         break;
+        //     }
+        //     total_sent += sent;
+        // }
+    //      char buffer[DATA_BUFFER_SIZE];
+    // ssize_t total = 0;
+    
+    // while (file.read(buffer, sizeof(buffer))) {
+    //     std::streamsize bytes_read = file.gcount(); // 正确位置获取
+    //     total=bytes_read;
+    //     ssize_t total_sent = 0;
+    //     while (total_sent < bytes_read) {
+    //         ssize_t sent = send(data_sock, 
+    //                           buffer + total_sent, 
+    //                           bytes_read - total_sent, 
+    //                           MSG_NOSIGNAL);
+    //         if (sent <= 0) {
+    //             throw std::runtime_error("发送失败");
     //         }
+    //         total_sent += sent;
+    //     }
+    //     total += total_sent;
+    // }
+    char buffer[DATA_BUFFER_SIZE];
+    ssize_t total = 0;
+    
+    while (file) {
+        file.read(buffer, sizeof(buffer));
+        std::streamsize bytes_read = file.gcount();
+        
+        if (bytes_read > 0) {
+            ssize_t total_sent = 0;
+            while (total_sent < bytes_read) {
+                ssize_t sent = send(data_sock, 
+                                  buffer + total_sent, 
+                                  bytes_read - total_sent, 
+                                  MSG_NOSIGNAL);
+                if (sent <= 0) {
+                    throw std::runtime_error("发送失败");
+                }
+                total_sent += sent;
+            }
+            total += total_sent;
+        }
+    }
+                    // ssize_t sent = send(data_sock, buffer, file.gcount(), 0);
+                    // if (sent < 0) throw std::runtime_error("发送失败");
+                    // total += sent;
+                
 
-    //        std::string response;
-    //         if (!send_command(raw_cmd, response)) return false;
-    //         std::cout << "服务器响应: " << response << std::endl;
+                std::string confirm;
+                if (!send_command("", confirm)) return false;
+                std::cout << "上传完成: " << confirm << " (" << total << " bytes)" << std::endl;
+
+                close_data_conn();
+                return true;
+            }
+
+           std::string response;
+            if (!send_command(raw_cmd, response)) return false;
+            std::cout << "服务器响应: " << response << std::endl;
             return true;
 
         } catch (const std::exception& e) {
