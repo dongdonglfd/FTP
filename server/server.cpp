@@ -19,7 +19,7 @@
 #define CONTROL_PORT 2100
 #define BUFFER_SIZE 1024
 #define SERVER_IP "127.0.0.1"  // 服务器IP地址
-#define ROOT_DIR "/tmp/ftproot" // 服务器根目录
+#define ROOT_DIR "/home/lfd/FTP/server" // 服务器根目录
 
 std::atomic<bool> server_running(true); // 服务器运行状态标志
 
@@ -34,7 +34,7 @@ private:
 
     // 发送响应到客户端（自动添加CRLF）
     void send_response(const std::string& response) {
-        std::string msg = response + "\n";
+        std::string msg = response + "\r\n";
         send(ctrl_sock, msg.c_str(), msg.size(), 0);
     }
 
@@ -58,14 +58,17 @@ public:
 
     // 主处理循环
     void handle() {
+        std::cout<<"连接成功"<<std::endl;
         send_response("220 Welcome to MyFTP Server");
 
         char buffer[BUFFER_SIZE];
         while (server_running) {
-            memset(buffer, 0, BUFFER_SIZE);
-            ssize_t bytes = recv(ctrl_sock, buffer, BUFFER_SIZE, 0);
-            if (bytes <= 0) break;
-
+            std::cout<<"2"<<std::endl;
+            
+                memset(buffer, 0, BUFFER_SIZE);
+                ssize_t bytes = recv(ctrl_sock, buffer, BUFFER_SIZE, 0);
+                std::cout << "收到命令: " << buffer << std::endl; // 添加此行
+                if (bytes <= 0) break;
             std::string cmd(buffer);
             cmd.erase(cmd.find_last_not_of("\r\n") + 1); // 清理命令结尾
 
@@ -75,7 +78,7 @@ public:
             std::string token;
             while(iss >> token) tokens.push_back(token);//从字符串流 iss 中逐个读取令牌，并将其添加到 tokens 向量中。
             if(tokens.empty()) continue;
-
+            std::cout<<"1"<<std::endl;
             std::string command = tokens[0];
             std::transform(command.begin(), command.end(), command.begin(), ::toupper);//用于对容器中的元素进行转换操作
 
@@ -112,10 +115,10 @@ private:
     void handle_pasv() {
         std::lock_guard<std::mutex> lock(data_mutex);
         
-        if(data_listen_sock != -1) {
-            close(data_listen_sock);
-            data_listen_sock = -1;
-        }
+        // if(data_listen_sock != -1) {
+        //     close(data_listen_sock);
+        //     data_listen_sock = -1;
+        // }
 
         // 创建数据监听socket
         data_listen_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -163,53 +166,53 @@ private:
         send_response(oss.str());
     }
 
-    // 处理LIST命令（目录列表）
-    void handle_list() {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        
-        if(data_listen_sock == -1) {
-            send_response("425 Use PASV first");
-            return;
-        }
 
-        // 接受数据连接
-        sockaddr_in client_addr{};
-        socklen_t addr_len = sizeof(client_addr);
-        data_sock = accept(data_listen_sock, 
-                         (sockaddr*)&client_addr, &addr_len);
-        if(data_sock < 0) {
-            send_response("425 Data connection failed");
-            return;
-        }
-
-        send_response("150 Here comes the directory listing");
-        
-        // 获取目录内容
-        DIR* dir = opendir(current_dir.c_str());
-        if(dir) {
-            std::string list;
-            dirent* entry;
-            while((entry = readdir(dir)) != nullptr) {
-                // 过滤特殊目录
-                if(strcmp(entry->d_name, ".") == 0 || 
-                   strcmp(entry->d_name, "..") == 0) continue;
-                
-                list += entry->d_name;
-                list += "\r\n";
-            }
-            closedir(dir);
-            send(data_sock, list.c_str(), list.size(), 0);
-        }
-
-        // 清理资源
-        close(data_sock);
-        close(data_listen_sock);
-        data_sock = -1;
-        data_listen_sock = -1;
-        send_response("226 Directory send OK");
+void handle_list() {
+    std::lock_guard<std::mutex> lock(data_mutex);
+    
+    if (data_listen_sock == -1) {
+        send_response("425 Use PASV first");
+        return;
     }
 
-    // 处理RETR命令（文件下载）
+    // 必须接受数据连接
+    sockaddr_in client_addr{};
+    socklen_t addr_len = sizeof(client_addr);
+    data_sock = accept(data_listen_sock, 
+                      (sockaddr*)&client_addr, &addr_len);
+    if (data_sock < 0) {
+        send_response("425 Data connection failed");
+        return;
+    }
+
+    send_response("150 Here comes the directory listing");
+
+    // 生成完整目录列表
+    std::string list;
+    DIR* dir = opendir(current_dir.c_str());
+    if (dir) {
+        dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            if (strcmp(entry->d_name, ".") == 0 || 
+                strcmp(entry->d_name, "..") == 0) continue;
+                
+            list += entry->d_name;
+            list += "\r\n"; // 必须使用CRLF
+        }
+        closedir(dir);
+        
+        // 一次性发送完整列表
+        send(data_sock, list.c_str(), list.size(), 0);
+    }
+
+    // 关闭数据连接（保留监听socket）
+    close(data_sock);
+    data_sock = -1;
+    
+    send_response("226 Directory send OK");
+}
+
+   // 处理RETR命令（文件下载）
     void handle_retr(const std::string& filename) {
         if(!is_safe_path(filename)) {
             send_response("550 Invalid filename");
@@ -243,11 +246,30 @@ private:
         
         // 分块传输文件
         char buffer[BUFFER_SIZE];
-        while(file.read(buffer, BUFFER_SIZE)) {
-            if(send(data_sock, buffer, file.gcount(), 0) < 0) {
+        // while(file.read(buffer, BUFFER_SIZE)) {
+        //     if(send(data_sock, buffer, file.gcount(), 0) < 0) {
+        //         break;
+        //     }
+        // }
+         while (true) {
+        file.read(buffer, sizeof(buffer));
+        std::streamsize bytes_read = file.gcount();
+        if (bytes_read <= 0) break;
+
+        ssize_t total_sent = 0;
+        while (total_sent < bytes_read) {
+            ssize_t sent = send(data_sock, 
+                              buffer + total_sent, 
+                              bytes_read - total_sent, 
+                              MSG_NOSIGNAL);
+            if (sent <= 0) {
+                std::cerr << "发送失败: " << strerror(errno) << std::endl;
                 break;
             }
+            total_sent += sent;
         }
+    }
+
 
         // 清理资源
         close(data_sock);
@@ -270,7 +292,7 @@ private:
             send_response("425 Use PASV first");
             return;
         }
-
+        send_response("150 Ready to receive data");
         // 建立数据连接
         data_sock = accept(data_listen_sock, nullptr, nullptr);
         if(data_sock < 0) {
@@ -287,14 +309,44 @@ private:
             return;
         }
 
-        send_response("150 Ready to receive data");
         
-        // 接收数据
+        
+        // // 接收数据
+        // char buffer[BUFFER_SIZE];
+        // ssize_t bytes_received;
+        // while((bytes_received = recv(data_sock, buffer, BUFFER_SIZE, 0)) > 0) {
+        //     file.write(buffer, bytes_received);
+        // }
+        // char buffer[1024];
+        //         ssize_t total = 0;
+        //         while (true) {
+        //             ssize_t bytes = recv(data_sock, buffer, sizeof(buffer), 0);
+        //             if (bytes < 0) throw std::runtime_error("接收失败");
+        //             if (bytes == 0) break;
+                    
+        //             file.write(buffer, bytes);
+        //             total += bytes;
+        //         }
         char buffer[BUFFER_SIZE];
-        ssize_t bytes_received;
-        while((bytes_received = recv(data_sock, buffer, BUFFER_SIZE, 0)) > 0) {
-            file.write(buffer, bytes_received);
+    ssize_t total = 0;
+    
+    while (true) {
+        ssize_t bytes = recv(data_sock, buffer, sizeof(buffer), 0);
+        if (bytes < 0) {
+            if (errno == EINTR) continue; // 处理中断
+            break;
         }
+        if (bytes == 0) break; // 客户端关闭连接
+        
+        file.write(buffer, bytes);
+        if (!file) {
+            send_response("451 本地文件写入错误");
+            break;
+        }
+        total += bytes;
+        
+        file.flush(); // 确保写入磁盘
+    }
 
         // 清理资源
         close(data_sock);
@@ -373,4 +425,4 @@ int main() {
     close(server_fd);
     std::cout << "\nServer stopped" << std::endl;
     return 0;
-}# FTP
+}
